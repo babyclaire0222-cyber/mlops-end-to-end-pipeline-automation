@@ -1,0 +1,78 @@
+# ==============================================================================
+# mlops-end-to-end-pipeline-automation
+# Central configuration file. All modules read from this file via
+# src/config.py so that no module hardcodes paths, credentials, or
+# hyperparameters. Override any value with environment variables (see .env.example)
+# ==============================================================================
+
+project:
+  name: "mlops-end-to-end-pipeline-automation"
+  random_state: 42
+
+# ------------------------------------------------------------------------------
+# Local filesystem paths (relative to project root)
+# ------------------------------------------------------------------------------
+paths:
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  raw_data_filename: "raw_dataset.csv"
+  train_filename: "train.csv"
+  test_filename: "test.csv"
+  model_dir: "artifacts/models"
+  model_filename: "model.joblib"
+  logs_dir: "logs"
+
+# ------------------------------------------------------------------------------
+# AWS S3 configuration
+# ------------------------------------------------------------------------------
+s3:
+  enabled: true
+  bucket_name: "mlops-end-to-end-pipeline-artifacts"
+  region: "us-east-1"
+  raw_data_key: "raw/raw_dataset.csv"
+  processed_train_key: "processed/train.csv"
+  processed_test_key: "processed/test.csv"
+  model_artifact_key: "models/model.joblib"
+
+# ------------------------------------------------------------------------------
+# Data ingestion / preprocessing settings
+# ------------------------------------------------------------------------------
+data:
+  target_column: "target"
+  test_size: 0.2
+  scale_numeric_features: true
+  missing_value_strategy: "median"   # options: median, mean, most_frequent
+
+# ------------------------------------------------------------------------------
+# Model & training hyperparameters
+# ------------------------------------------------------------------------------
+model:
+  type: "random_forest"     # options: random_forest, gradient_boosting
+  hyperparameters:
+    n_estimators: 300
+    max_depth: 12
+    min_samples_split: 4
+    min_samples_leaf: 2
+    n_jobs: -1
+  cross_validation:
+    n_splits: 5
+    scoring: "f1_weighted"
+
+# ------------------------------------------------------------------------------
+# MLflow tracking configuration
+# ------------------------------------------------------------------------------
+mlflow:
+  tracking_uri: "mlruns"          # local dir; swap for a remote tracking server URI
+  experiment_name: "mlops-end-to-end-pipeline"
+  registered_model_name: "mlops_pipeline_classifier"
+  registry_stage_on_pass: "Staging"
+
+# ------------------------------------------------------------------------------
+# Automated quality gate thresholds
+# A model must meet or exceed ALL thresholds below to be promoted/registered.
+# ------------------------------------------------------------------------------
+quality_gates:
+  min_accuracy: 0.80
+  min_f1_score: 0.75
+  min_precision: 0.70
+  min_recall: 0.70

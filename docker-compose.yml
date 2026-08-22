@@ -1,0 +1,66 @@
+version: "3.9"
+
+# Local end-to-end stack:
+#   mlflow-db      -> Postgres backend store for run/param/metric metadata
+#   mlflow-server  -> MLflow tracking server + registry UI on :5000
+#   pipeline       -> this project's CLI, pointed at mlflow-server
+#
+# Usage:
+#   docker compose up -d mlflow-db mlflow-server   # start tracking infra
+#   docker compose run --rm pipeline --run-all      # run the pipeline against it
+#   open http://localhost:5000                      # browse runs/models
+
+services:
+  mlflow-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow
+      POSTGRES_DB: mlflow
+    volumes:
+      - mlflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mlflow-server:
+    build:
+      context: .
+      dockerfile: docker/mlflow.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mlflow-db:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    command:
+      - "--backend-store-uri=postgresql://mlflow:mlflow@mlflow-db:5432/mlflow"
+      - "--default-artifact-root=/mlartifacts"
+      - "--serve-artifacts"
+    volumes:
+      - mlflow-artifacts:/mlartifacts
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - mlflow-server
+    environment:
+      MLFLOW_TRACKING_URI: "http://mlflow-server:5000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./logs:/app/logs
+    # Override the Dockerfile's default CMD (["--run-all"]) at the CLI, e.g.:
+    #   docker compose run --rm pipeline --ingest
+    command: ["--run-all"]
+
+volumes:
+  mlflow-db-data:
+  mlflow-artifacts:
