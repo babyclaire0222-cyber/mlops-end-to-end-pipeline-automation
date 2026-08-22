@@ -12,7 +12,6 @@ Responsibilities:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Tuple
 
 import boto3
 import pandas as pd
@@ -189,7 +188,7 @@ def split_dataset(
     target_column: str,
     test_size: float = 0.2,
     random_state: int = 42,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Split a DataFrame into stratified train and test partitions.
 
@@ -224,7 +223,7 @@ def split_dataset(
     return train_df, test_df
 
 
-def run_ingestion_pipeline(config: DotDict) -> Tuple[str, str]:
+def run_ingestion_pipeline(config: DotDict) -> tuple[str, str]:
     """
     Execute the full ingestion stage: load, clean, split, persist, and upload.
 

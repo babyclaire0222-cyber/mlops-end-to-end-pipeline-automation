@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 from dotenv import load_dotenv
@@ -87,7 +87,7 @@ class Config:
 
         try:
             with open(path, "r", encoding="utf-8") as f:
-                raw_config: Dict[str, Any] = yaml.safe_load(f)
+                raw_config: dict[str, Any] = yaml.safe_load(f)
         except yaml.YAMLError as exc:
             raise ConfigurationError(f"Failed to parse YAML configuration: {exc}") from exc
 
@@ -99,7 +99,7 @@ class Config:
         return DotDict(raw_config)
 
     @classmethod
-    def _validate(cls, raw_config: Dict[str, Any]) -> None:
+    def _validate(cls, raw_config: dict[str, Any]) -> None:
         """Ensure all required top-level configuration sections are present."""
         missing = [key for key in cls._REQUIRED_TOP_LEVEL_KEYS if key not in raw_config]
         if missing:

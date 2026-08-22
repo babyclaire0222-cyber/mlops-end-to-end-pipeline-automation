@@ -18,10 +18,9 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import sys
-from typing import Optional
 
-import click
 import mlflow
 
 from src.config import Config
@@ -78,26 +77,34 @@ def _register_stage(config, run_id: str, passed_gates: bool) -> None:
         )
 
 
-@click.command()
-@click.option("--config", "config_path", default="config/config.yaml", show_default=True, help="Path to the YAML configuration file.")
-@click.option("--run-all", is_flag=True, help="Run ingestion, training, evaluation, and registration sequentially.")
-@click.option("--ingest", is_flag=True, help="Run only the data ingestion stage.")
-@click.option("--train", "do_train", is_flag=True, help="Run ingestion + training (training needs processed data).")
-@click.option("--evaluate", "do_evaluate", is_flag=True, help="Run ingestion + training + evaluation.")
-@click.option("--register", "do_register", is_flag=True, help="Run the full pipeline including registration (equivalent to --run-all).")
-def cli(config_path: str, run_all: bool, ingest: bool, do_train: bool, do_evaluate: bool, do_register: bool) -> None:
+def cli() -> None:
     """Command-line entrypoint chaining the MLOps pipeline stages."""
+    parser = argparse.ArgumentParser(description="Command-line entrypoint chaining the MLOps pipeline stages.")
+    parser.add_argument("--config", dest="config_path", default="config/config.yaml", help="Path to the YAML configuration file.")
+    parser.add_argument("--run-all", action="store_true", help="Run ingestion, training, evaluation, and registration sequentially.")
+    parser.add_argument("--ingest", action="store_true", help="Run only the data ingestion stage.")
+    parser.add_argument("--train", dest="do_train", action="store_true", help="Run ingestion + training (training needs processed data).")
+    parser.add_argument("--evaluate", dest="do_evaluate", action="store_true", help="Run ingestion + training + evaluation.")
+    parser.add_argument("--register", dest="do_register", action="store_true", help="Run the full pipeline including registration (equivalent to --run-all).")
+    args = parser.parse_args()
+
+    config_path = args.config_path
+    run_all = args.run_all
+    ingest = args.ingest
+    do_train = args.do_train
+    do_evaluate = args.do_evaluate
+    do_register = args.do_register
+
     if not any([run_all, ingest, do_train, do_evaluate, do_register]):
-        click.echo("No stage flag provided. Use --help to see available options.")
-        sys.exit(1)
+        parser.error("No stage flag provided. Use --help to see available options.")
 
     try:
         config = Config.load(config_path)
 
-        train_path: Optional[str] = None
-        test_path: Optional[str] = None
+        train_path: str | None = None
+        test_path: str | None = None
         model = X_test = y_test = None
-        run_id: Optional[str] = None
+        run_id: str | None = None
         passed_gates = False
 
         needs_ingest = run_all or ingest or do_train or do_evaluate or do_register
@@ -122,8 +129,10 @@ def cli(config_path: str, run_all: bool, ingest: bool, do_train: bool, do_evalua
     except PipelineError as exc:
         logger.error("Pipeline execution failed: %s", exc)
         sys.exit(1)
-    except Exception as exc:  # noqa: BLE001 - top-level safety net for the CLI
-        logger.exception("Unexpected error during pipeline execution: %s", exc)
+    except Exception:
+        # logger.exception() automatically attaches the traceback, so the
+        # exception object itself does not need to be interpolated here.
+        logger.exception("Unexpected error during pipeline execution.")
         sys.exit(1)
 
 

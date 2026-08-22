@@ -13,7 +13,6 @@ Responsibilities:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict
 
 import mlflow
 import pandas as pd
@@ -31,13 +30,13 @@ logger = get_logger(__name__)
 class EvaluationResult:
     """Structured result of a model evaluation against quality gates."""
 
-    metrics: Dict[str, float]
-    thresholds: Dict[str, float]
+    metrics: dict[str, float]
+    thresholds: dict[str, float]
     passed_gates: bool
-    failed_checks: Dict[str, str] = field(default_factory=dict)
+    failed_checks: dict[str, str] = field(default_factory=dict)
 
 
-def compute_metrics(model: ClassifierMixin, X_test: pd.DataFrame, y_test: pd.Series) -> Dict[str, float]:
+def compute_metrics(model: ClassifierMixin, X_test: pd.DataFrame, y_test: pd.Series) -> dict[str, float]:
     """
     Compute accuracy, weighted F1, precision, and recall on the test set.
 
@@ -71,7 +70,7 @@ def compute_metrics(model: ClassifierMixin, X_test: pd.DataFrame, y_test: pd.Ser
     return metrics
 
 
-def check_quality_gates(metrics: Dict[str, float], config: DotDict) -> EvaluationResult:
+def check_quality_gates(metrics: dict[str, float], config: DotDict) -> EvaluationResult:
     """
     Compare computed metrics against configured minimum thresholds.
 
@@ -91,7 +90,7 @@ def check_quality_gates(metrics: Dict[str, float], config: DotDict) -> Evaluatio
         "test_recall": config.quality_gates.min_recall,
     }
 
-    failed_checks: Dict[str, str] = {}
+    failed_checks: dict[str, str] = {}
     for metric_name, threshold in thresholds.items():
         actual_value = metrics.get(metric_name)
         if actual_value is None:

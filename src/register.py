@@ -11,8 +11,6 @@ Responsibilities:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import mlflow
 from mlflow.entities.model_registry import ModelVersion
 from mlflow.exceptions import MlflowException
@@ -30,7 +28,7 @@ def register_model(
     passed_gates: bool,
     config: DotDict,
     artifact_path: str = "model",
-) -> Optional[ModelVersion]:
+) -> ModelVersion | None:
     """
     Register a model from a completed MLflow run to the Model Registry.
 

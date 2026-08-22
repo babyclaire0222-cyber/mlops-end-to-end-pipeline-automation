@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import joblib
 import mlflow
@@ -35,7 +35,7 @@ _SUPPORTED_MODELS = {
 }
 
 
-def build_model(model_type: str, hyperparameters: Dict[str, Any], random_state: int) -> ClassifierMixin:
+def build_model(model_type: str, hyperparameters: dict[str, Any], random_state: int) -> ClassifierMixin:
     """
     Instantiate a scikit-learn classifier based on configuration.
 
@@ -64,7 +64,7 @@ def build_model(model_type: str, hyperparameters: Dict[str, Any], random_state: 
 
 def load_train_test_data(
     train_path: str, test_path: str, target_column: str
-) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
     """
     Load processed train/test CSVs and split them into features and target.
 
@@ -98,7 +98,7 @@ def load_train_test_data(
 
 def run_training_pipeline(
     config: DotDict, train_path: str, test_path: str
-) -> Tuple[ClassifierMixin, pd.DataFrame, pd.Series, str]:
+) -> tuple[ClassifierMixin, pd.DataFrame, pd.Series, str]:
     """
     Train a classifier inside an MLflow run, logging params/metrics/artifacts.
 
