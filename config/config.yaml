@@ -27,7 +27,7 @@ paths:
 # ------------------------------------------------------------------------------
 s3:
   enabled: true
-  bucket_name: "mlops-end-to-end-pipeline-artifacts"
+  bucket_name: "mlops-pipeline-artifacts-yuyua0222"
   region: "us-east-1"
   raw_data_key: "raw/raw_dataset.csv"
   processed_train_key: "processed/train.csv"
@@ -42,6 +42,17 @@ data:
   test_size: 0.2
   scale_numeric_features: true
   missing_value_strategy: "median"   # options: median, mean, most_frequent
+
+# ------------------------------------------------------------------------------
+# Data validation ("unit tests for data") — runs on the raw dataset before
+# any cleaning/splitting. A failure here raises DataValidationError and
+# halts the pipeline before a model can be trained on bad data.
+# ------------------------------------------------------------------------------
+data_validation:
+  enabled: true
+  required_columns: null       # null = defaults to just [data.target_column]
+  max_missing_ratio: 0.3       # fail if any column is >30% missing
+  min_rows: 10                # fail if the dataset has fewer rows than this
 
 # ------------------------------------------------------------------------------
 # Model & training hyperparameters

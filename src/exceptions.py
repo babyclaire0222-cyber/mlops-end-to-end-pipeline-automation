@@ -25,6 +25,10 @@ class S3OperationError(DataIngestionError):
     """Raised specifically when an AWS S3 upload/download operation fails."""
 
 
+class DataValidationError(DataIngestionError):
+    """Raised when raw or processed data fails schema/quality validation checks."""
+
+
 class TrainingError(PipelineError):
     """Raised when model training or MLflow logging during training fails."""
 

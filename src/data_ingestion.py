@@ -21,6 +21,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 from src.config import DotDict
+from src.data_validation import run_validation_pipeline
 from src.exceptions import DataIngestionError, S3OperationError
 from src.logger import get_logger
 
@@ -244,6 +245,7 @@ def run_ingestion_pipeline(config: DotDict) -> tuple[str, str]:
     test_path = processed_dir / config.paths.test_filename
 
     df = load_raw_data(str(raw_path))
+    run_validation_pipeline(df, config)
     df_clean = handle_missing_and_scale(
         df,
         target_column=config.data.target_column,
