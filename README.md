@@ -1,171 +1,131 @@
-# mlops-end-to-end-pipeline-automation
+## System Architecture
 
-A production-grade, modular MLOps pipeline demonstrating:
+```mermaid
+flowchart TB
+    User["Browser / User"]
 
-- Clean Python software design (type hints, docstrings, structured logging, custom exceptions, decoupled config)
-- **MLflow** experiment tracking and Model Registry automation
-- **AWS S3** integration for raw/processed artifact storage (`boto3`)
-- Automated **quality gates** that block bad models from being registered
-- A single **CLI orchestrator** (`main.py`) chaining every stage
+    subgraph DNS["DNS"]
+        DuckDNS["DuckDNS<br/>babyclaire-mflow.duckdns.org"]
+    end
 
-## Directory Structure
+    subgraph AWS["AWS (us-east-1)"]
+        EIP["Elastic IP<br/>54.85.158.235"]
 
+        subgraph EC2["EC2 t3.small — 2GB RAM + 1.8GB swap, 20GB disk"]
+            Caddy["Caddy reverse proxy<br/>:80 / :443<br/>Let's Encrypt HTTPS<br/>Basic Auth (admin)"]
+            MLflowSrv["mlflow-server<br/>:5000 (internal only,<br/>not publicly exposed)"]
+            PG[("Postgres 16<br/>mlflow-db<br/>backend store")]
+            Caddy -->|"reverse_proxy"| MLflowSrv
+            MLflowSrv -->|"metrics / params / runs"| PG
+        end
+
+        S3[("S3 bucket<br/>raw + processed data,<br/>model artifacts")]
+        ECR["ECR repository<br/>pipeline Docker image"]
+    end
+
+    subgraph Runner["Local machine / GitHub Actions"]
+        Pipeline["main.py --run-all<br/>ingest -> validate -> train -><br/>evaluate -> visualize -> register"]
+    end
+
+    User -->|"HTTPS"| DuckDNS --> EIP --> Caddy
+    Pipeline -->|"MLFLOW_TRACKING_URI"| Caddy
+    Pipeline -->|"boto3 upload/download"| S3
+    Pipeline -.->|"docker build && push"| ECR
 ```
-mlops-end-to-end-pipeline-automation/
-├── config/
-│   └── config.yaml            # All tunable settings: paths, S3, hyperparams, quality gates
-├── src/
-│   ├── config.py               # Decoupled YAML config loader (dot-access)
-│   ├── logger.py                # Centralized structured logging
-│   ├── exceptions.py            # Custom exception hierarchy
-│   ├── data_ingestion.py        # Load, clean, split, S3 upload/download
-│   ├── train.py                 # Model training + MLflow run/logging
-│   ├── evaluate.py               # Metric computation + quality-gate checks
-│   └── register.py               # MlflowClient-based registry automation
-├── pipelines/                   # Reserved for higher-level DAG orchestration (Airflow/Prefect)
-├── tests/                       # Pytest unit tests
-├── scripts/
-│   └── generate_sample_data.py  # Creates a synthetic dataset for a first run
-├── main.py                       # Click-based CLI entrypoint
-├── requirements.txt
-├── .env.example
-└── .gitignore
-```
 
-## Quickstart
+**Public entry point:** only Caddy is internet-facing (ports 80/443). `mlflow-server` and
+`mlflow-db` are reachable solely over the internal Docker network — neither is directly
+exposed, so all traffic must pass through Caddy's HTTPS termination and Basic Auth first.
 
+## Infrastructure Notes — Lessons Learned
+
+Deploying the MLflow dashboard publicly (EC2 + Caddy + Let's Encrypt + Basic Auth)
+surfaced two resource-sizing issues worth documenting, since the symptoms were
+initially misleading:
+
+### Memory exhaustion masqueraded as an SSH/networking failure
+
+The instance was originally sized as `t3.micro` (1GB RAM). Running Postgres,
+`mlflow-server`, and Caddy simultaneously left the OS with very little headroom —
+under load, available memory dropped enough that **`sshd` itself became too starved
+to complete new SSH handshakes**, even though:
+- the instance showed **"Running"** with **passing EC2 status checks**,
+- the **TCP connection to port 22 succeeded** (confirmed via `Test-NetConnection`),
+- and the security group rules were correctly configured.
+
+This combination made it look like a networking or security-group problem — status
+checks passing usually implies "the instance is fine" — but the failure was actually
+the SSH daemon being unable to respond under memory pressure. `dmesg` didn't show an
+explicit OOM-killer event either, which is consistent with the system being *near*
+the edge under load rather than an process actually getting killed at the moment it
+was checked — the more direct evidence was memory usage sitting at 87%+ on `t3.micro`
+during normal dashboard use, versus a comfortable 45% after resizing.
+
+**Fix:** resized to `t3.small` (2GB RAM) and added a 1.8GB swap file as a safety
+margin:
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-
-# 2. Configure environment (AWS creds, MLflow URI)
-cp .env.example .env
-# edit .env with real values, or leave S3 disabled in config.yaml for local-only runs
-
-# 3. Generate a synthetic dataset (skip if you have your own raw_dataset.csv)
-python scripts/generate_sample_data.py
-
-# 4. Run the full pipeline: ingest -> train -> evaluate -> register
-python main.py --run-all
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-## Running Individual Stages
+### Disk exhaustion, separately
 
+The default 6.71GB root volume filled up from the combination of the OS, the
+Docker engine, three rebuilt images (~1.8GB in `/var/lib/docker` +
+`/var/lib/containerd`), and the swap file itself — reaching 99.7% used. Since the
+disk was already provisioned as a GPT partition, growing the EBS volume in the AWS
+console (8GB → 20GB) was reflected immediately at the block-device level, but the
+filesystem needed to be told to claim the new space:
 ```bash
-python main.py --ingest              # data ingestion only
-python main.py --train               # ingestion + training
-python main.py --evaluate            # ingestion + training + evaluation
-python main.py --register            # full pipeline incl. registration (same as --run-all)
-python main.py --config path/to/other_config.yaml --run-all
+sudo growpart /dev/nvme0n1 1   # confirmed already grown to full disk in this case
+sudo resize2fs /dev/nvme0n1p1  # this was the step that actually freed up space
+df -h /
 ```
 
-## Quality Gates
+**Takeaway:** on a memory- or disk-constrained instance, passing status checks and a
+successful TCP handshake are *necessary but not sufficient* signals that a service is
+healthy — application-level responsiveness (SSH's own handshake, in this case) can
+degrade well before infrastructure-level health checks notice anything wrong.
 
-Defined in `config/config.yaml` under `quality_gates`. A trained model is registered
-to the MLflow Model Registry (stage: `Staging` by default) **only if** it meets or
-exceeds every threshold:
+## Security
+
+### Postgres credentials
+
+`mlflow-db`'s password is **not** hardcoded in `docker-compose.yml` — it's read from a
+`.env` file (gitignored, never committed) via `${POSTGRES_PASSWORD}`:
 
 ```yaml
-quality_gates:
-  min_accuracy: 0.80
-  min_f1_score: 0.75
-  min_precision: 0.70
-  min_recall: 0.70
+mlflow-db:
+  environment:
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 ```
 
-If any threshold is not met, `evaluate.py` returns `passed_gates: False`, `register.py`
-skips registration entirely, and the pipeline logs the specific failed checks.
-
-## Viewing Experiments
+To rotate it on the server:
 
 ```bash
-mlflow ui --backend-store-uri mlruns
+# 1. Generate a new password without ever printing it to the terminal
+NEW_DB_PW=$(openssl rand -base64 18)
+echo "$NEW_DB_PW" > ~/db_password_SAVE_THIS.txt && chmod 600 ~/db_password_SAVE_THIS.txt
+
+# 2. Write it to .env (picked up by docker-compose automatically)
+echo "POSTGRES_PASSWORD=$NEW_DB_PW" > .env && chmod 600 .env
+unset NEW_DB_PW
+
+# 3. Update the already-initialized Postgres user to match (the env var alone
+#    only affects a *fresh* database initialization, not an existing one)
+docker compose exec mlflow-db psql -U mlflow -d mlflow \
+  -c "ALTER USER mlflow WITH PASSWORD '$(cat ~/db_password_SAVE_THIS.txt)';"
+
+# 4. Recreate the dependent containers so they pick up the new .env
+docker compose up -d --force-recreate mlflow-server mlflow-db
+
+# 5. Clean up the plaintext file once saved to a password manager
+rm ~/db_password_SAVE_THIS.txt
 ```
 
-Then open `http://localhost:5000` to browse runs, metrics, and registered model versions.
-
-## Running Tests
-
-```bash
-pytest tests/ -v --cov=src
-```
-
-## Disabling S3 (local-only mode)
-
-Set `s3.enabled: false` in `config/config.yaml` — `data_ingestion.py` will skip all
-upload/download calls and log a warning instead of failing.
-
-## Continuous Integration
-
-`.github/workflows/ci.yml` runs on every push/PR to `main`:
-
-1. Lints with `ruff` and runs the `pytest` suite with coverage, across Python 3.10 and 3.11.
-2. Runs a full pipeline smoke test on synthetic data (S3 disabled) and uploads the
-   resulting `mlruns/` directory as a build artifact.
-
-## Docker
-
-Build and run the pipeline in a container:
-
-```bash
-docker build -t mlops-pipeline .
-docker run --rm \
-  -v "$(pwd)/mlruns:/app/mlruns" \
-  -v "$(pwd)/data:/app/data" \
-  -v "$(pwd)/artifacts:/app/artifacts" \
-  --env-file .env \
-  mlops-pipeline --run-all
-```
-
-Mounting `mlruns/`, `data/`, and `artifacts/` keeps experiment history and model
-artifacts on the host instead of trapped inside the container.
-
-## Local MLflow + Postgres Stack (docker-compose)
-
-`docker-compose.yml` spins up a real tracking server backed by Postgres instead of
-the local `mlruns/` folder, so runs and registered models persist and are browsable
-from a proper MLflow UI:
-
-```bash
-docker compose up -d mlflow-db mlflow-server   # start Postgres + MLflow tracking server
-open http://localhost:5000                      # browse the MLflow UI
-
-docker compose run --rm pipeline --run-all       # run the full pipeline against it
-docker compose run --rm pipeline --ingest        # or an individual stage
-```
-
-`mlflow-server` uses `docker/mlflow.Dockerfile` (mlflow + psycopg2 + boto3) and stores
-artifacts in a named volume (`mlflow-artifacts`); swap `--default-artifact-root` in
-`docker-compose.yml` for an `s3://...` URI to use S3 as the artifact store instead.
-
-## Deployment Notes
-
-This repo is a training/registration pipeline, not a live inference service, so
-"deployment" here means running it reliably and automatically rather than standing up
-a web server. What's included:
-
-- **`.github/workflows/scheduled-retrain.yml`**: runs the full pipeline on a cron
-  schedule (default: weekly) against the real S3 bucket / MLflow server via GitHub
-  Secrets, letting the quality gates decide whether to register each new model.
-- **`.github/workflows/deploy-ecr.yml`**: after CI passes on `main`, builds the
-  Docker image and pushes it to Amazon ECR, tagged with both `latest` and the commit
-  SHA — the artifact a scheduler (ECS Fargate task, Kubernetes CronJob, etc.) would run.
-- **`docker-compose.yml`**: a real MLflow tracking server + Postgres backend for local
-  development, so runs aren't limited to a local `mlruns/` folder (see above).
-- **Serving the registered model**: once a model is in the `Staging`/`Production`
-  stage of the registry, serve it separately with `mlflow models serve -m
-  "models:/<registered_model_name>/Staging"` or deploy it to SageMaker/a container —
-  this pipeline's job ends at registration.
-
-### Required GitHub Secrets
-
-For `scheduled-retrain.yml` and `deploy-ecr.yml` to run, add these under
-**Settings → Secrets and variables → Actions** (a `production` environment with its
-own secrets is recommended over repo-level secrets):
-
-| Secret | Used by | Purpose |
-|---|---|---|
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | both | AWS auth for S3 + ECR |
-| `AWS_REGION` | both | AWS region for S3 + ECR |
-| `S3_BUCKET_NAME` | scheduled-retrain | bucket holding `raw_dataset.csv` |
-| `MLFLOW_TRACKING_URI` | scheduled-retrain | real tracking server URL |
+`mlflow-db` and `mlflow-server` are never exposed outside the Docker network (only Caddy
+publishes ports 80/443 publicly), so this rotation is precautionary rather than a
+response to any actual exposure.
