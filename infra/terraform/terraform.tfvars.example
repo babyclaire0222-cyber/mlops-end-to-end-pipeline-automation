@@ -1,0 +1,9 @@
+# Copy this file to terraform.tfvars and fill in real values.
+# terraform.tfvars is gitignored - never commit real bucket names if they are
+# meant to stay private, and never commit credentials here (Terraform reads
+# AWS credentials from the same environment/CLI config as the aws CLI).
+
+aws_region          = "us-east-1"
+s3_bucket_name      = "mlops-end-to-end-pipeline-artifacts"
+ecr_repository_name = "mlops-end-to-end-pipeline-automation"
+environment         = "production"

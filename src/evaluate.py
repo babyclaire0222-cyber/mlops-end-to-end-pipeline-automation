@@ -22,6 +22,7 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 from src.config import DotDict
 from src.exceptions import EvaluationError
 from src.logger import get_logger
+from src.visualization import generate_and_log_evaluation_plots
 
 logger = get_logger(__name__)
 
@@ -146,5 +147,10 @@ def run_evaluation_pipeline(
             mlflow.set_tag("failed_checks", str(result.failed_checks))
     except Exception as exc:
         raise EvaluationError(f"Failed to log evaluation results to MLflow: {exc}") from exc
+
+    try:
+        generate_and_log_evaluation_plots(model, X_test, y_test, result.metrics, result.thresholds)
+    except Exception as exc:  # noqa: BLE001 - plot generation is best-effort, never pipeline-blocking
+        logger.warning("Failed to generate/log evaluation plots: %s", exc)
 
     return result

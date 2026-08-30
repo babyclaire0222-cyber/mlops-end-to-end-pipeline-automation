@@ -1,3 +1,18 @@
+
+## Live Demo
+
+A public instance of this pipeline's MLflow tracking server is running at:
+
+**https://babyclaire-mflow.duckdns.org**
+
+It's protected by HTTP Basic Auth - reach out for demo credentials. The dashboard shows
+real experiment runs from this pipeline, including logged metrics, hyperparameters, the
+evaluation plots (confusion matrix, metrics-vs-thresholds, feature importance), and the
+registered `mlops_pipeline_classifier` model staged in `Staging`.
+
+Infrastructure: EC2 (`t3.small`) running the `docker-compose.yml` stack in this repo
+(Caddy reverse proxy with automatic Let's Encrypt HTTPS + Basic Auth -> MLflow tracking
+server -> Postgres backend), with a DuckDNS-managed domain and an Elastic IP.
 ## System Architecture
 
 ```mermaid
@@ -11,7 +26,7 @@ flowchart TB
     subgraph AWS["AWS (us-east-1)"]
         EIP["Elastic IP<br/>54.85.158.235"]
 
-        subgraph EC2["EC2 t3.small — 2GB RAM + 1.8GB swap, 20GB disk"]
+        subgraph EC2["EC2 t3.small - 2GB RAM + 1.8GB swap, 20GB disk"]
             Caddy["Caddy reverse proxy<br/>:80 / :443<br/>Let's Encrypt HTTPS<br/>Basic Auth (admin)"]
             MLflowSrv["mlflow-server<br/>:5000 (internal only,<br/>not publicly exposed)"]
             PG[("Postgres 16<br/>mlflow-db<br/>backend store")]
@@ -34,10 +49,10 @@ flowchart TB
 ```
 
 **Public entry point:** only Caddy is internet-facing (ports 80/443). `mlflow-server` and
-`mlflow-db` are reachable solely over the internal Docker network — neither is directly
+`mlflow-db` are reachable solely over the internal Docker network - neither is directly
 exposed, so all traffic must pass through Caddy's HTTPS termination and Basic Auth first.
 
-## Infrastructure Notes — Lessons Learned
+## Infrastructure Notes - Lessons Learned
 
 Deploying the MLflow dashboard publicly (EC2 + Caddy + Let's Encrypt + Basic Auth)
 surfaced two resource-sizing issues worth documenting, since the symptoms were
@@ -46,19 +61,19 @@ initially misleading:
 ### Memory exhaustion masqueraded as an SSH/networking failure
 
 The instance was originally sized as `t3.micro` (1GB RAM). Running Postgres,
-`mlflow-server`, and Caddy simultaneously left the OS with very little headroom —
+`mlflow-server`, and Caddy simultaneously left the OS with very little headroom -
 under load, available memory dropped enough that **`sshd` itself became too starved
 to complete new SSH handshakes**, even though:
 - the instance showed **"Running"** with **passing EC2 status checks**,
 - the **TCP connection to port 22 succeeded** (confirmed via `Test-NetConnection`),
 - and the security group rules were correctly configured.
 
-This combination made it look like a networking or security-group problem — status
-checks passing usually implies "the instance is fine" — but the failure was actually
+This combination made it look like a networking or security-group problem - status
+checks passing usually implies "the instance is fine" - but the failure was actually
 the SSH daemon being unable to respond under memory pressure. `dmesg` didn't show an
 explicit OOM-killer event either, which is consistent with the system being *near*
 the edge under load rather than an process actually getting killed at the moment it
-was checked — the more direct evidence was memory usage sitting at 87%+ on `t3.micro`
+was checked - the more direct evidence was memory usage sitting at 87%+ on `t3.micro`
 during normal dashboard use, versus a comfortable 45% after resizing.
 
 **Fix:** resized to `t3.small` (2GB RAM) and added a 1.8GB swap file as a safety
@@ -75,9 +90,9 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 The default 6.71GB root volume filled up from the combination of the OS, the
 Docker engine, three rebuilt images (~1.8GB in `/var/lib/docker` +
-`/var/lib/containerd`), and the swap file itself — reaching 99.7% used. Since the
+`/var/lib/containerd`), and the swap file itself - reaching 99.7% used. Since the
 disk was already provisioned as a GPT partition, growing the EBS volume in the AWS
-console (8GB → 20GB) was reflected immediately at the block-device level, but the
+console (8GB â†’ 20GB) was reflected immediately at the block-device level, but the
 filesystem needed to be told to claim the new space:
 ```bash
 sudo growpart /dev/nvme0n1 1   # confirmed already grown to full disk in this case
@@ -87,14 +102,14 @@ df -h /
 
 **Takeaway:** on a memory- or disk-constrained instance, passing status checks and a
 successful TCP handshake are *necessary but not sufficient* signals that a service is
-healthy — application-level responsiveness (SSH's own handshake, in this case) can
+healthy - application-level responsiveness (SSH's own handshake, in this case) can
 degrade well before infrastructure-level health checks notice anything wrong.
 
 ## Security
 
 ### Postgres credentials
 
-`mlflow-db`'s password is **not** hardcoded in `docker-compose.yml` — it's read from a
+`mlflow-db`'s password is **not** hardcoded in `docker-compose.yml` - it's read from a
 `.env` file (gitignored, never committed) via `${POSTGRES_PASSWORD}`:
 
 ```yaml
